@@ -1,0 +1,395 @@
+<?php
+/**
+ * implements hook_menu
+ */
+function taxonomy_overlap_menu(){
+  $menu = array();
+  $menu['node/%/compare/%'] = array(
+    'title' => t('Compare taxonomy'),
+    'page callback' => 'taxonomy_overlap_compare',
+    'page arguments' => array(1,3),
+    'access arguments' => array('access content')
+  );
+  $menu['compare/view'] = array(
+    'title' => t('Compare taxonomy'),
+    'page callback' => 'taxonomy_overlap_overview',
+    'page arguments' => array(),
+    'access arguments' => array('access content')
+  );
+  $menu['compare/calculate'] = array(
+    'title' => t('Compare taxonomy'),
+    'page callback' => 'taxonomy_overlap_cron',
+    'page arguments' => array(),
+    'access arguments' => array('access content')
+  );
+  $menu['node/%/%/tag/%'] = array(
+    'title' => t('Compare taxonomy'),
+    'page callback' => 'taxonomy_overlap_tag_action',
+    'page arguments' => array(1,2,4),
+    'access arguments' => array('access content')
+  );
+  return $menu;
+}
+
+/**
+ * Some actions called from the compare detail form
+ * @param unknown_type $nid
+ * @param unknown_type $op
+ * @param unknown_type $tid
+ */
+function taxonomy_overlap_tag_action( $nid, $op,$tid, $redirect = true){
+  if(is_numeric($nid)){
+    $node = node_load($nid);
+  }
+  switch($node->type){
+    case 'course':
+      $taxonomy = &$node->field_course_subjects[$node->language];
+      break;
+    case 'certificate':
+      $taxonomy = &$node->field_cert_subject[$node->language];
+      break;
+  }
+  if(is_numeric($tid)){
+   $tag = taxonomy_term_load($tid);
+  }
+  switch($op){
+    case 'add':
+      $taxonomy[] = array('tid' => $tag->tid);
+      drupal_set_message(t('tag %tag added.', array('%tag'=>$tag->name)));
+      break;
+    case 'remove':
+      foreach($taxonomy as $key => $value){
+        if($value['tid'] == $tid){
+          unset($taxonomy[$key]);
+        }
+      }      
+      drupal_set_message(t('tag %tag removed.', array('%tag'=>$tag->name)));
+      
+      break;    
+  }
+  node_save($node);
+  if($redirect){
+    drupal_goto($_SERVER['HTTP_REFERER']);
+  }
+}
+/** 
+ * generate a table with the percentages the taxonomy overlaps
+ */
+function taxonomy_overlap_overview(){
+  $rows = array();
+  
+    $query = db_select('taxonomy_compare', 'tc');
+    
+    // join the node tables of the two nodes
+    $query->leftJoin('node', 'na', 'tc.node1 = na.nid');
+    $query->leftJoin('node', 'nb', 'tc.node2 = nb.nid');
+
+    
+    // set the fields you want to retrieve
+    $query->addField('tc' , 'percentage', 'perc');
+    
+    $query->addField('na' , 'nid', 'na_nid');
+    $query->addField('na' , 'title', 'na_title');
+    $query->addField('na' , 'type', 'na_type');
+    
+    $query->addField('nb' , 'nid', 'nb_nid');   
+    $query->addField('nb' , 'title', 'nb_title');
+    $query->addField('nb' , 'type', 'nb_type');   
+    
+    // order the results
+    $query->orderBy('perc', 'desc');
+    // execute and fetch the query
+    $results = $query->execute()->fetchAll();
+    
+    foreach($results as $compare){
+      $rows[] = array($compare->na_type.': '.$compare->na_title, $compare->nb_type.': '.$compare->nb_title, l(round($compare->perc, 2).'%', 'node/'.$compare->na_nid.'/compare/'.$compare->nb_nid));
+    }
+    
+      // theme as a table
+    return theme('table',
+      array(
+            'header' => array(t('Node A'),t('Node B'), t('Percentage')),
+            'rows' => $rows,
+            'attributes' => array('class' => 'table-compare'),
+            'caption'=>null,
+            'colgroups'=>null,
+            'sticky'=>null,
+            'empty'=>null
+      )
+    );
+}
+
+function taxonomy_overlap_get_taxonomy($node){
+  $taxonomy_orig = array();
+  switch($node->type){
+    case 'course':
+      $taxonomy_orig = $node->field_course_subjects[$node->language];
+      break;
+    case 'certificate':
+      $taxonomy_orig = $node->field_cert_subject[$node->language];
+      break;
+  }
+  $taxonomy = array();
+  foreach($taxonomy_orig as $key => $tag){
+    $taxonomy[$tag['tid']] = taxonomy_term_load($tag['tid']);
+  }
+
+  return $taxonomy;
+}
+
+function taxonomy_overlap_compare($a, $b){
+  $node_a = node_load($a);
+  $node_b = node_load($b);
+
+  drupal_set_title( $node_a->type.' '.$node_a->title.' '.t('vs.').' '.$node_b->type.' '.$node_b->title);
+
+  // get the taxonomy
+  $taxonomy_a = taxonomy_overlap_get_taxonomy($node_a);
+  $taxonomy_b = taxonomy_overlap_get_taxonomy($node_b);
+  $all_taxonomy = array_merge($taxonomy_a, $taxonomy_b);
+
+  // generate the rows for the table
+  $rows = array();
+  $matches = 0;
+  foreach($all_taxonomy as $tid => $tag){
+    if(!isset($rows[$tag->tid])){
+      
+      $in_a = isset($taxonomy_a[$tag->tid]) 
+        ? '<div class="true">'.t('true').'</div>' 	.l(t('Remove'), 'node/'.$node_a->nid.'/remove/tag/'.$tag->tid)
+        : '<div class="false">'.t('false').'</div>' .l(t('Add'), 'node/'.$node_a->nid.'/add/tag/'.$tag->tid) ;
+      $in_b = isset($taxonomy_b[$tag->tid]) 
+        ? '<div class="true">'.t('true').'</div>' 	.l(t('Remove'), 'node/'.$node_b->nid.'/remove/tag/'.$tag->tid)
+        : '<div class="false">'.t('false').'</div>' .l(t('Add'), 'node/'.$node_b->nid.'/add/tag/'.$tag->tid) ;
+      
+      // check if it matches
+      $match = (isset($taxonomy_a[$tag->tid]) && isset($taxonomy_b[$tag->tid])) ? '<div class="true">'.t('true').'</div>' : '<div class="false">'.t('false').'</div>';
+      if(isset($taxonomy_a[$tag->tid]) && isset($taxonomy_b[$tag->tid]) ){
+        $matches++;
+      }
+      $rows[$tag->tid] = array($tag->name,$match, $in_a, $in_b);
+    }
+  }
+  
+  $rows['new'] = array(
+    t('Add new taxonomy'), 
+    '', 
+    drupal_render(drupal_get_form('taxonomy_overlap_add_form', $node_a)), 
+    drupal_render(drupal_get_form('taxonomy_overlap_add_form', $node_b))
+  );
+  
+  // calculate the percentage
+  $percentage_a = round($matches/count($taxonomy_a)*100, 2);
+  $percentage_b = round($matches/count($taxonomy_b)*100, 2);
+  
+
+  // generate some extra information
+  $output = '<p>'.t('Node %node_b contains %perc of the subjects form %node_a. (%matches)', array('%perc'=>$percentage_a.'%', '%node_a'=>$node_a->title,'%node_b'=>$node_b->title, '%matches'=>$matches.'/'.count($taxonomy_a))).'</p>';
+  $output .= '<p>'.t('Node %node_a contains %perc of the subjects form %node_b. (%matches)', array('%perc'=>$percentage_b.'%', '%node_a'=>$node_a->title,'%node_b'=>$node_b->title, '%matches'=>$matches.'/'.count($taxonomy_b))).'</p>';
+ 
+  drupal_add_css(drupal_get_path('module', 'taxonomy_overlap').'/taxonomy_overlap.css');
+  // theme as a table
+  $output .=  theme('table',
+    array(
+            'header' => array(t('Subject'),  t('Match'), $node_a->type.' '.$node_a->title,  $node_b->type.' '.$node_b->title),
+            'rows' => $rows,
+            'attributes' => array('class' => 'table-compare'),
+            'caption'=>null,
+            'colgroups'=>null,
+            'sticky'=>null,
+            'empty'=>null
+    )
+  );
+
+  return $output;
+}
+
+function taxonomy_overlap_block_view($delta = '') {
+  // This example is adapted from node.module.
+  $block = array();
+
+  switch ($delta) {
+    case 'certificates':
+      if(arg(0)=='node' &&  is_numeric(arg(1))){
+        $course = node_load(arg(1));
+
+        if($course->type == 'course'){
+          $block['subject'] = t('Related certificates');
+          $block['content'] = theme('compare_list', array('nodes' => taxonomy_overlap_get_nodes_by_node($course), 'current_node'=>$course));
+        }
+      }
+      break;
+  }
+  return $block;
+}
+
+function taxonomy_overlap_block_info() {
+  $blocks = array();
+  $blocks['certificates'] = array(
+    'info' => t('Related certificates'),
+    'region' => 'content',
+    'status' => 1,
+    'cache' => DRUPAL_NO_CACHE,
+    'pages' => array('node/*')
+  );
+  return $blocks;
+}
+
+function taxonomy_overlap_theme($existing, $type, $theme, $path){
+  return array(
+    'compare_list' => array(
+      'variables' => array('nodes' => NULL, 'current_node'=> null),
+  ),
+  );
+}
+
+function theme_compare_list($vars){
+  $nodes = $vars['nodes'];
+  if(is_array($nodes)){
+    // make rows of the nodes
+    $rows = array();
+    foreach($nodes as $node){
+      $rows[$node->nid] = array('name'=>l($node->title, 'node/'.$vars['current_node']->nid.'/compare/'.$node->nid), 'percentage'=>round($node->percentage, 2).'%');
+    }
+
+    // theme as a table
+    $output =  theme('table',
+    array(
+            'header' => array('name', 'percentage'),
+            'rows' => $rows,
+            'attributes' => array('class' => 'table-compare'),
+            'caption'=>null,
+            'colgroups'=>null,
+            'sticky'=>null,
+            'empty'=>null
+    )
+    );
+
+    return $output;
+  }
+}
+
+function taxonomy_overlap_get_nodes_by_node($node){
+  switch($node->type){
+    case 'course':
+      if(isset($node->field_course_subjects[$node->language])){
+        $taxonomy = $node->field_course_subjects[$node->language];
+        $db_table = 'field_data_field_cert_subject';
+        $db_field = 'field_cert_subject_tid';
+      }
+      break;
+    case 'certificate':
+      if(isset($node->field_cert_subject[$node->language])){
+        $taxonomy = $node->field_cert_subject[$node->language];
+        $db_table = 'field_data_field_course_subjects';
+        $db_field = 'field_course_subjects_tid';
+      }
+      break;
+  }
+  if(isset($taxonomy) && is_array($taxonomy)){
+
+    $query = db_select($db_table);
+
+    // set the fields you want to retrieve
+    $query->addField($db_table , 'entity_id');
+    $query->addField($db_table , $db_field, 'tid');
+     
+    // set the taxonomy conditions
+    $conditions = db_or();
+    foreach($taxonomy as $tag){
+      $conditions->condition($db_field, $tag['tid']);
+    }
+    $query->condition($conditions);
+
+
+    // execute and fetch the query in groups
+    $results = $query->execute()->fetchAll(PDO::FETCH_GROUP);
+    $taxonomy_count = count($taxonomy);
+    $nodes = array();
+    foreach($results as $entity_id => $matches){    
+      
+      // loop through te matches to prevent duplicates
+      $tags = array();
+      foreach($matches as $tag){
+        $tags[$tag->tid] = $tag->tid;
+      }  
+      $nodes[$entity_id] = node_load($entity_id);
+      $nodes[$entity_id]->percentage = (count($tags)*100/$taxonomy_count);
+      $nodes[$entity_id]->matches = count($tags);
+      
+    }
+    return $nodes;
+  }
+  return false;
+}
+
+/**
+ * Implements hook_cron().
+ */
+function taxonomy_overlap_cron() {
+  $query = db_select('node');
+  $query->addField('node' , 'nid');
+  // execute and fetch the query in groups
+  $results = $query->execute()->fetchAll();
+  
+  foreach($results as $nid_a){
+    $node_a = node_load($nid_a->nid);
+    $nodes = taxonomy_overlap_get_nodes_by_node($node_a);
+    if($nodes){
+      foreach($nodes as $node_b){
+        $tax_compare->node2 = $node_a->nid;
+        $tax_compare->node1 = $node_b->nid;
+        $tax_compare->percentage=$node_b->percentage;
+        $query = db_select('taxonomy_compare');
+        
+        $query->condition('node1', $tax_compare->node1);
+        $query->condition('node2', $tax_compare->node2);
+        if($query->countQuery()->execute()->fetch()->expression){
+          drupal_write_record('taxonomy_compare', $tax_compare, array('node1', 'node2'));
+        }else{
+          drupal_write_record('taxonomy_compare', $tax_compare);
+        }
+      }
+    }
+  }  
+  return 'success';
+}
+
+/**
+ * Implements hook_form().
+ */
+function taxonomy_overlap_add_form($form, &$form_state, $node) {
+  $form = array();
+  
+  $form['tag'] = array(
+    '#type' => 'textfield',
+    '#autocomplete_path' => 'taxonomy/autocomplete/field_cert_subject',
+    '#maxlength' => 1024,
+  );
+  
+  $form['node'] = array(
+    '#type' => 'value',
+    '#value' => $node
+  );
+  
+  $form['submit'] = array('#value'=>t('Add'), '#type'=>'submit');
+  
+  return $form;
+}
+
+function taxonomy_overlap_add_form_submit($form, &$form_state) {
+  $tag_names = explode(',', $form_state['values']['tag']);
+  $node = $form_state['values']['node'];
+  foreach($tag_names as $name){
+    $tags = taxonomy_get_term_by_name($name);
+    if(empty($tags)){
+      $tag->name = $name;
+      $tag->vid = 1;
+      taxonomy_term_save($tag);
+      $tags = taxonomy_get_term_by_name($name);
+    }
+      foreach($tags as $tag){
+        taxonomy_overlap_tag_action($node->nid, 'add', $tag->tid, false);
+      }
+  }  
+  
+}

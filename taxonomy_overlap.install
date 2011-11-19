@@ -1,0 +1,49 @@
+<?php
+/**
+ * Implements hook_schema().
+ */
+function taxonomy_overlap_schema() {
+  $schema['taxonomy_compare'] = array(
+    'description' => '',
+    'fields' => array(
+      'node1' => array(
+        'type' => 'int',
+        'description' => '',
+        'not null' => TRUE,
+      ),
+      'node2' => array(
+        'type' => 'int',
+        'description' => '',
+        'not null' => TRUE,
+      ),
+      'percentage' => array(
+      	'type'=>'float',
+        'description' => '',
+        'not null' => TRUE,
+      ),
+    ),
+    'indexes' => array(
+      'node_2'        => array('node2'),
+      'node_1'        => array('node1'),
+      ),
+    'unique keys' => array(
+      'node_1_2' => array('node1', 'node2'),
+      ),
+    'primary key' => array('node1', 'node2'),
+  );
+  return $schema;
+}
+
+/**
+ * Implements hook_install().
+ */
+function taxonomy_overlap_install() {
+  drupal_install_schema('taxonomy_overlap');
+}
+
+/**
+ * Implements hook_install().
+ */
+function taxonomy_overlap_update_7002() {
+  drupal_install_schema('taxonomy_overlap');
+}
