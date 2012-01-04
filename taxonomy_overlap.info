@@ -1,5 +1,4 @@
 name = Taxonomy overlap
 description = Make an view of the overlapping percentage of other nodes
-version = VERSION
 core = 7.x
 project status url = http://f.daanmolenaar.nl/fserver

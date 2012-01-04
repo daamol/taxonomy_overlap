@@ -507,7 +507,6 @@ function taxonomy_overlap_get_comparisation($nid_a, $nid_b) {
   $query->condition('node2', $nid_b);
 
   $result = $query->execute()->fetchObject();
-  dpm($result);
   return $result;
 }
 
