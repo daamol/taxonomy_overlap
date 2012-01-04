@@ -21,6 +21,11 @@ function taxonomy_overlap_schema() {
         'description' => '',
         'not null' => TRUE,
       ),
+      'description' => array(
+      	'type'=> 'text',
+        'description' => '',
+        'not null' => TRUE,
+      ),
     ),
     'indexes' => array(
       'node_2'        => array('node2'),

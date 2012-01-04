@@ -120,13 +120,13 @@ function taxonomy_overlap_overview(){
   // theme as a table
   return theme('table',
   array(
-            'header' => array(t('Behaald'),t('Te doen'), t('Behaalde percentage van stof')),
-            'rows' => $rows,
-            'attributes' => array('class' => 'table-compare'),
-            'caption'=>null,
-            'colgroups'=>null,
-            'sticky'=>null,
-            'empty'=>null
+  'header' => array(t('Behaald'),t('Te doen'), t('Behaalde percentage van stof')),
+  'rows' => $rows,
+  'attributes' => array('class' => 'table-compare'),
+  'caption'=>null,
+  'colgroups'=>null,
+  'sticky'=>null,
+  'empty'=>null
   )
   );
 }
@@ -157,6 +157,10 @@ function taxonomy_overlap_compare($a, $b){
     $node_a = $a;
     $node_b = $b;
   }
+  $comparisation = taxonomy_overlap_get_comparisation($node_a->nid, $b->nid);
+  
+
+  
   $view_editlinks = node_access('update', $node_a) && node_access('update', $node_b);
 
   drupal_set_title( $node_a->type.' '.$node_a->title.' '.t('vs.').' '.$node_b->type.' '.$node_b->title);
@@ -222,7 +226,11 @@ function taxonomy_overlap_compare($a, $b){
   // generate some extra information
   $output = '<p>'.t('Node %node_b contains %perc of the subjects form %node_a. (%matches)', array('%perc'=>$percentage_a.'%', '%node_a'=>$node_a->title,'%node_b'=>$node_b->title, '%matches'=>$matches.'/'.count($taxonomy_a))).'</p>';
   $output .= '<p>'.t('Node %node_a contains %perc of the subjects form %node_b. (%matches)', array('%perc'=>$percentage_b.'%', '%node_a'=>$node_a->title,'%node_b'=>$node_b->title, '%matches'=>$matches.'/'.count($taxonomy_b))).'</p>';
+  $output .= '<p>'.$comparisation->description.'</p>';
+  if($view_editlinks){
 
+    $output .= drupal_render(drupal_get_form('taxonomy_overlap_description_form', $comparisation));
+  }  
   drupal_add_css(drupal_get_path('module', 'taxonomy_overlap').'/taxonomy_overlap.css');
   // theme as a table
   $output .=  theme('table',
@@ -439,3 +447,67 @@ function taxonomy_overlap_add_form_submit($form, &$form_state) {
   }
 
 }
+
+/**
+ * Implements hook_form().
+ */
+function taxonomy_overlap_description_form($comparisation, &$form_state, $comparisation) {
+  $form = array();
+  $form['node1'] = array(
+    '#type' => 'value',
+    '#value' => $comparisation->node1
+  );
+  $form['node2'] = array(
+    '#type' => 'value',
+    '#value' => $comparisation->node2
+  );
+  $form['fieldset']  = array(
+  	'#type' =>'fieldset',
+    '#title' => t('Edit description'),
+    '#collapsible' => TRUE,
+    '#collapsed' => TRUE
+  );
+  $form['fieldset']['description'] = array(
+    '#type' => 'textarea',
+    '#default_value' => $comparisation->description
+  );
+
+  $form['fieldset']['submit'] = array(
+    '#type' => 'submit',
+    '#value' => t('Save')
+  );
+  
+  
+  return $form;
+}
+
+/**
+ * Implements hook_form_submit().
+ */
+function taxonomy_overlap_description_form_submit($form, $form_state) {
+  $comparisation = taxonomy_overlap_get_comparisation($form_state['values']['node1'], $form_state['values']['node2']);
+  $comparisation->description = $form_state['values']['description'];
+  
+  // write the description to the database
+  if(drupal_write_record('taxonomy_compare', $comparisation, array('node1', 'node2'))){
+    drupal_set_message(t('Beschrijving opgeslagen.'));
+  }
+}
+
+function taxonomy_overlap_get_comparisation($nid_a, $nid_b) {
+  $query = db_select('taxonomy_compare', 'tc');
+
+  // set the fields you want to retrieve
+  $query->addField('tc' , 'percentage', 'percentage');
+  $query->addField('tc' , 'description', 'description');
+  $query->addField('tc' , 'node1', 'node1');
+  $query->addField('tc' , 'node2', 'node2');
+
+  $query->condition('node1', $nid_a);
+  $query->condition('node2', $nid_b);
+
+  $result = $query->execute()->fetchObject();
+  dpm($result);
+  return $result;
+}
+
